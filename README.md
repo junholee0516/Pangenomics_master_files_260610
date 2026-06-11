@@ -481,7 +481,7 @@ chmod +x scripts/cnv_pipeline/*.sh
 Example command:
 
 ```bash
-cd /BiO/Pangenomics_master_files_260610
+cd /Pangenomics_master_files_260610
 bash scripts/cnv_pipeline/run_master.sh <CEL_DIR> <RUN_NAME> [TEMPLATE_FILES_DIR]
 ```
 
