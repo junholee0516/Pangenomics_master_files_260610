@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_DIR="/BiO/Pangenomics_master_files_260610/output/cnv_runs"
+BASE_DIR="_"
 TO="_@_.com"
 
 RUN_DIR="${1:-}"
