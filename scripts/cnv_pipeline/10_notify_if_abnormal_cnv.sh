@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE_DIR="/BiO/Pangenomics_master_files_260610/output/cnv_runs"
-TO="junho.lee@theragenhealth.com"
+TO="_@_.com"
 
 RUN_DIR="${1:-}"
 
