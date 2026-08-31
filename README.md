@@ -6,7 +6,7 @@ Important: This repository contains workflow code only. Thermo Fisher/Affymetrix
 
 ## Pipeline
 
-01  Build CEL list
+01  Build CEL list /n
 02  DishQC
 03  Filter DishQC PASS samples
 04  Call rate / Step1 genotyping
