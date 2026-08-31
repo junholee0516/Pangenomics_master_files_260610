@@ -1,10 +1,10 @@
-PangenomiX CNV + SNV Pipeline
+## PangenomiX CNV + SNV Pipeline
 
 Production-oriented Bash pipeline for Axiom array data that performs QC gating, CNV analysis, AxAS-compatible CNV batch packaging, SNV Step2 genotyping, and base-call export.
 
 Important: This repository contains workflow code only. Thermo Fisher/Affymetrix APT binaries, Axiom library files, AxAS template files, CEL data, annotation databases, and other vendor/runtime assets are not included and should not be committed.
 
-Pipeline
+# Pipeline
 
 01  Build CEL list
 02  DishQC
@@ -21,7 +21,7 @@ Pipeline
 
 The master entry point is run_master.sh.
 
-Validated operating mode
+# Validated operating mode
 
 The current strict production mode requires exactly 96 input CEL files. Samples that fail QC may be removed downstream, so the final QC-PASS/Step2 sample count can be lower than 96.
 
@@ -37,7 +37,7 @@ The source package documented a historical SNV Golden comparison of:
 
 This GitHub package preserves that statement as historical validation evidence; it does not independently rerun the vendor workflow because vendor binaries, libraries, templates, and CEL data are not included here.
 
-Requirements
+# Requirements
 
 Linux / Bash
 
@@ -63,7 +63,7 @@ ProbeSet target list
 
 The SNV strict mode currently expects APT version string v2.12.0-rc2 in the Step1 calls metadata.
 
-Recommended runtime layout
+# Recommended runtime layout
 
 The repository can be cloned anywhere. By default, output is created under the repository root. Vendor/runtime assets should live outside Git or in ignored folders.
 
@@ -80,7 +80,7 @@ repo/
 
 You can also keep all runtime assets elsewhere and provide explicit paths.
 
-Run
+# Run
 
 export LIB_DIR=/path/to/Axiom_PangenomiX.r1
 export APT_DISHQC=/path/to/apt-geno-qc-axiom
@@ -102,7 +102,7 @@ export RESUME=1
 # Strictly compare exported SNV calls against an AxAS reference export.
 export SNV_REFERENCE_RESULT=/path/to/AxAS_export.txt
 
-Main outputs
+# Main outputs
 
 output/cnv_runs/<RUN_NAME>/
 ├── 08_final_tables/
@@ -120,12 +120,12 @@ The check runs Bash syntax validation, compiles embedded Python heredocs, and ve
 
 A lightweight GitHub Actions workflow runs the same static checks on pushes and pull requests. It does not run the analytical pipeline because vendor software and genomic test data are intentionally absent.
 
-Data and repository safety
+# Data and repository safety
 
 Do not commit raw CEL files, sample-level outputs, APT logs, AxAS binary/template assets, annotation databases, or any files containing patient/sample identifiers. The bundled .gitignore blocks the most common runtime and genomic file types, but it is not a substitute for reviewing git status before every push.
 
 For an employer-developed production workflow, confirm internal IP policy and third-party software/data licensing before making the repository public. A private repository is the safer default.
 
-License
+# License
 
 No open-source license is included in this publication candidate. Add a license only after confirming ownership of the workflow code and the terms governing the related vendor assets and internal work product.
