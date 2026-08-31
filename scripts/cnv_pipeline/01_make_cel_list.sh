@@ -30,4 +30,3 @@ if [ "$N" -eq 0 ]; then
   echo "[ERROR] CEL 파일이 0개입니다."
   exit 1
 fi
-
