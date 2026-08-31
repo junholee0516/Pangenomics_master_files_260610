@@ -89,5 +89,3 @@ do
   fi
   ls -lh "$f"
 done
-
-
