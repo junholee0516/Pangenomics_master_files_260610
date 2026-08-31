@@ -5,77 +5,39 @@ CONFIG="${1:?run_config.sh 필요}"
 source "$CONFIG"
 
 echo "============================================================"
-echo "[09] AxAS Copy Number Discovery batch folder 생성"
+echo "[09] AxAS Copy Number Discovery batch folder 생성 - PRODUCTION FINAL"
 echo "============================================================"
 
-AXAS_DIR="$OUT/AxAS_Copy_Number_Discovery_batch_$RUN_NAME"
+BASE="${BASE:-/BiO/Pangenomics_master_files_260610}"
+AXAS_DIR="${AXAS_DIR:-$OUT/AxAS_Copy_Number_Discovery_batch_$RUN_NAME}"
 AAS_DATA="$AXAS_DIR/AxiomAnalysisSuiteData"
 
 SRC_07="$OUT/07_discovery_hmm/CNData"
 SRC_TEMP="$OUT/Temp"
 
-mkdir -p "$AXAS_DIR"
-mkdir -p "$AAS_DATA"
-mkdir -p "$AXAS_DIR/CNData"
-mkdir -p "$AXAS_DIR/Temp"
-mkdir -p "$AXAS_DIR/Logs"
-mkdir -p "$AXAS_DIR/QC"
-mkdir -p "$AXAS_DIR/snpLists"
+# 실제 AxAS에서 open 검증된 donor batch.
+# binary/schema 구조는 그대로 유지하고 현재 run에 필요한 sample명/plate/well/path만 교체한다.
+TEMPLATE_AXAS_BATCH="${TEMPLATE_AXAS_BATCH:-$TEMPLATE_FILES_DIR}"
 
 echo "[INFO] RUN_NAME=$RUN_NAME"
-echo "[INFO] CEL_DIR=${CEL_DIR:-}"
-echo "[INFO] CEL_LIST=${CEL_LIST:-}"
+echo "[INFO] OUT=$OUT"
 echo "[INFO] AXAS_DIR=$AXAS_DIR"
+echo "[INFO] TEMPLATE_AXAS_BATCH=$TEMPLATE_AXAS_BATCH"
+echo "[INFO] CEL_LIST=${CEL_LIST:-}"
 
-echo
-echo "[1] AxiomAnalysisSuiteData template 복사"
-if [ -d "$TEMPLATE_FILES_DIR/AxiomAnalysisSuiteData" ]; then
-  cp -a "$TEMPLATE_FILES_DIR/AxiomAnalysisSuiteData/." "$AAS_DATA/" || true
-fi
-
-echo
-echo "[2] CNData 복사"
-if [ ! -s "$SRC_07/AxiomHMM.cnv.a5" ]; then
-  echo "[ERROR] AxiomHMM.cnv.a5 없음: $SRC_07/AxiomHMM.cnv.a5"
-  exit 1
-fi
-
-if [ ! -s "$SRC_07/AxiomHMM.report.txt" ]; then
-  echo "[ERROR] AxiomHMM.report.txt 없음: $SRC_07/AxiomHMM.report.txt"
-  exit 1
-fi
-
-cp -f "$SRC_07/AxiomHMM.cnv.a5" "$AXAS_DIR/CNData/AxiomHMM.cnv.a5"
-cp -f "$SRC_07/AxiomHMM.report.txt" "$AXAS_DIR/CNData/AxiomHMM.report.txt"
-
-echo
-echo "[3] Temp 파일 복사"
-for f in CopyNumber.APT2Input GenoTyping.APT2Input ChangedSCAxiom_PangenomiX.r1.apt-genotype-axiom.AxiomCN_GT1.apt2.xml; do
-  found=""
-  for d in "$SRC_TEMP" "$OUT/Temp" "$TEMPLATE_FILES_DIR/Temp"; do
-    if [ -s "$d/$f" ]; then
-      found="$d/$f"
-      break
-    fi
-  done
-
-  if [ -n "$found" ]; then
-    cp -f "$found" "$AXAS_DIR/Temp/$f"
-    echo "[OK] $f copied"
-  else
-    echo "[WARN] $f 없음"
+for f in \
+  "$TEMPLATE_AXAS_BATCH/AxiomAnalysisSuiteData/sample_info.bin" \
+  "$TEMPLATE_AXAS_BATCH/AxiomAnalysisSuiteData/cel_headers.txt" \
+  "$TEMPLATE_AXAS_BATCH/AxiomAnalysisSuiteData/batch_info.xml" \
+  "$TEMPLATE_AXAS_BATCH/genotyping_cel_files.txt" \
+  "$SRC_07/AxiomHMM.cnv.a5" \
+  "$SRC_07/AxiomHMM.report.txt"
+do
+  if [ ! -s "$f" ]; then
+    echo "[ERROR] 필수 파일 없음: $f"
+    exit 1
   fi
 done
-
-echo
-echo "[4] root AxiomGT1.* 제거"
-rm -f "$AXAS_DIR"/AxiomGT1.calls.txt
-rm -f "$AXAS_DIR"/AxiomGT1.confidences.txt
-rm -f "$AXAS_DIR"/AxiomGT1.report.txt
-rm -f "$AXAS_DIR"/AxiomGT1.summary.a5
-
-echo
-echo "[5] 현재 CEL_LIST 기준 AxAS metadata 생성"
 
 CEL_LIST_FOR_AXAS=""
 for f in "${CEL_LIST:-}" "$OUT/01_input/cel_list.txt" "$OUT/input/cel_list.txt" "$OUT/cel_list.txt"; do
@@ -86,39 +48,99 @@ for f in "${CEL_LIST:-}" "$OUT/01_input/cel_list.txt" "$OUT/input/cel_list.txt" 
 done
 
 if [ -z "$CEL_LIST_FOR_AXAS" ]; then
-  echo "[ERROR] CEL list 없음"
-  echo "CEL_LIST=${CEL_LIST:-}"
-  echo "OUT=$OUT"
+  echo "[ERROR] current run CEL list를 찾지 못했습니다."
   exit 1
 fi
 
-python3 - "$CEL_LIST_FOR_AXAS" "$AXAS_DIR" "$AAS_DATA" "$TEMPLATE_FILES_DIR" "${CEL_DIR:-}" "$RUN_NAME" <<'PY'
+echo
+echo "[1] known-good AxAS donor batch 복사"
+
+rm -rf "$AXAS_DIR"
+cp -a "$TEMPLATE_AXAS_BATCH" "$AXAS_DIR"
+
+mkdir -p \
+  "$AAS_DATA" \
+  "$AXAS_DIR/CNData" \
+  "$AXAS_DIR/Temp" \
+  "$AXAS_DIR/Logs" \
+  "$AXAS_DIR/QC" \
+  "$AXAS_DIR/snpLists"
+
+rm -f \
+  "$AAS_DATA/All_genotypes_by_snps.CHP.bin" \
+  "$AAS_DATA/All_genotypes_by_snps.CHP.index.txt"
+
+echo
+echo "[2] current run CNData 적용"
+
+cp -f "$SRC_07/AxiomHMM.cnv.a5" \
+      "$AXAS_DIR/CNData/AxiomHMM.cnv.a5"
+
+cp -f "$SRC_07/AxiomHMM.report.txt" \
+      "$AXAS_DIR/CNData/AxiomHMM.report.txt"
+
+cp -f "$SRC_07/AxiomHMM.report.txt" \
+      "$AAS_DATA/current_hmm_metrics.tsv"
+
+echo
+echo "[3] current run Temp 적용"
+
+for f in \
+  CopyNumber.APT2Input \
+  GenoTyping.APT2Input \
+  ChangedSCAxiom_PangenomiX.r1.apt-genotype-axiom.AxiomCN_GT1.apt2.xml
+do
+  found=""
+  for d in "$SRC_TEMP" "$OUT/Temp"; do
+    if [ -s "$d/$f" ]; then
+      found="$d/$f"
+      break
+    fi
+  done
+
+  if [ -n "$found" ]; then
+    cp -f "$found" "$AXAS_DIR/Temp/$f"
+    echo "[OK] $f"
+  else
+    echo "[WARN] current run에서 $f 없음 - donor 파일 유지"
+  fi
+done
+
+echo
+echo "[4] current CEL용 AxAS metadata 안전 패치"
+
+python3 - \
+  "$CEL_LIST_FOR_AXAS" \
+  "$SRC_07/AxiomHMM.report.txt" \
+  "$TEMPLATE_AXAS_BATCH/AxiomAnalysisSuiteData/sample_info.bin" \
+  "$TEMPLATE_AXAS_BATCH/AxiomAnalysisSuiteData/cel_headers.txt" \
+  "$AAS_DATA/sample_info.bin" \
+  "$AAS_DATA/cel_headers.txt" \
+  "$AXAS_DIR/genotyping_cel_files.txt" \
+  "$OUT/axas_sample_name_map.tsv" \
+  "$RUN_NAME" <<'PY'
 from __future__ import print_function
-import sys
+
+import csv
 import os
 import re
-import csv
-import uuid
 import struct
-import hashlib
-from datetime import datetime
+import sys
 
-cel_list_file = sys.argv[1]
-axas_dir = sys.argv[2]
-aas_data = sys.argv[3]
-template_dir = sys.argv[4]
-cel_dir = sys.argv[5]
-run_name = sys.argv[6]
+(
+    cel_list_file,
+    hmm_report_file,
+    donor_sample_info,
+    donor_cel_headers,
+    out_sample_info,
+    out_cel_headers,
+    out_genotyping,
+    out_map,
+    run_name,
+) = sys.argv[1:10]
 
-genotyping_file = os.path.join(axas_dir, "genotyping_cel_files.txt")
-sample_info_bin = os.path.join(aas_data, "sample_info.bin")
-cel_headers_out = os.path.join(aas_data, "cel_headers.txt")
-hmm_report = os.path.join(axas_dir, "CNData", "AxiomHMM.report.txt")
-
-template_cel_headers = os.path.join(template_dir, "AxiomAnalysisSuiteData", "cel_headers.txt")
-template_genotyping = os.path.join(template_dir, "genotyping_cel_files.txt")
-
-sample_fields = [
+MAX_INPUT_N = 96
+EXPECTED_FIELDS = [
     "cel_files",
     "affymetrix-plate-barcode",
     "affymetrix-plate-peg-wellposition",
@@ -127,458 +149,454 @@ sample_fields = [
     "affymetrix-array-id",
 ]
 
+def basename_sample(x):
+    return str(x).strip().replace("\\", "/").split("/")[-1]
+
 def clean_line(x):
     x = x.strip()
     if x.startswith(u"\ufeff"):
         x = x.lstrip(u"\ufeff")
     return x
 
-def basename_sample(x):
-    return str(x).replace("\\", "/").split("/")[-1]
-
-def detect_windows_prefix():
-    # AxAS용 genotyping_cel_files.txt는 Windows-style path를 사용함.
-    # Demo Data 경로는 하드코딩하지 않고 RUN_NAME 기반으로 생성.
-    # 필요하면 실행 전에 AXAS_WINDOWS_CEL_PREFIX 환경변수로 지정 가능.
-    bs = chr(92)
-
-    env = os.environ.get("AXAS_WINDOWS_CEL_PREFIX", "").strip()
-
-    if env:
-        env = env.replace("/", bs)
-        if not env.endswith(bs):
-            env += bs
-        return env
-
-    safe_run = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_name)
-
-    return (
-        "C:" + bs +
-        "Users" + bs +
-        "Public" + bs +
-        "Documents" + bs +
-        "AxiomAnalysisSuite" + bs +
-        safe_run + bs
-    )
-
-
-def extract_well_from_name(name):
-    base = basename_sample(name)
-    stem = os.path.splitext(base)[0]
-
-    # 가장 중요한 규칙:
-    # NA11882_Axiom_PangenomiX_Plus_A04.CEL 에서
-    # NA11882 안의 A11이 아니라, 맨 뒤 suffix A04만 잡아야 함.
-    m = re.search(r'(?:^|[_\-.])([A-P](?:0[1-9]|1[0-9]|2[0-4]))$', stem, re.I)
-    if m:
-        return m.group(1).upper()
-
-    # 혹시 확장자 제거 후 token이 분리되어 있으면 마지막 well token만 사용
-    tokens = re.split(r'[_\-.]+', stem)
-    for token in reversed(tokens):
-        if re.match(r'^[A-P](?:0[1-9]|1[0-9]|2[0-4])$', token, re.I):
-            return token.upper()
-
-    return None
-
-def guess_well(name, idx):
-    well = extract_well_from_name(name)
-    if well:
-        return well
-
-    # filename에서 well을 못 찾을 때만 순서 기반 fallback
-    # AxAS plate view는 A-P / 1-24 형태를 쓸 수 있으므로 16x24 기준
-    rows = "ABCDEFGHIJKLMNOP"
-    r = rows[(idx // 24) % 16]
-    c = (idx % 24) + 1
-    return "{}{:02d}".format(r, c)
-
-def guess_plate(name, run_name):
-    # 예전 로직은 NA11882에서 N + A11로 잘못 분리했음.
-    # CEL header에서 plate barcode를 못 읽을 때는 filename을 억지로 자르지 말고 RUN_NAME을 사용.
-    return run_name
-
-
-def stable_uuid(base, salt):
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, base + "_" + salt))
-
-def stable_identifier(base, salt):
-    h = hashlib.sha256((base + "_" + salt).encode("utf-8")).hexdigest()
-    return "{}-{}-{}-{}-{}".format(
-        h[0:10],
-        h[10:20],
-        h[20:27],
-        h[27:34],
-        h[34:41],
-    )
-
 def read_cel_list(path):
     out = []
     with open(path, "r") as f:
         for raw in f:
             line = clean_line(raw)
-
-            if not line:
-                continue
-            if line.startswith("#"):
+            if not line or line.startswith("#"):
                 continue
             if line.lower() == "cel_files":
                 continue
-
             if "\t" in line:
                 line = line.split("\t")[0].strip()
-
-            if "/" not in line and "\\" not in line and cel_dir:
-                candidate = os.path.join(cel_dir, line)
-                if os.path.exists(candidate):
-                    line = candidate
-
             out.append(line)
-
     return out
 
-def read_template_cel_header():
-    if not os.path.exists(template_cel_headers):
-        fields = [
-            "cel_files",
-            "affymetrix-array-id",
-            "affymetrix-array-barcode",
-            "affymetrix-scan-date",
-            "affymetrix-created-trackingGUID",
-            "affymetrix-parent-dat-file-identifier",
-            "affymetrix-plate-barcode",
-            "affymetrix-plate-peg-wellposition",
-            "affymetrix-scanner-id",
-            "affymetrix-scanner-type",
-            "plateRows",
-            "plateColumns",
-            "cel_filepath",
-            "cel_file_identifier",
-        ]
-        return fields, {}, {}
+def extract_well(name):
+    stem = os.path.splitext(basename_sample(name))[0]
+    m = re.search(r'(?:^|[_\-.])([A-H](?:0[1-9]|1[0-2]))$', stem, re.I)
+    if m:
+        return m.group(1).upper()
+    toks = re.split(r'[_\-.]+', stem)
+    for t in reversed(toks):
+        if re.match(r'^[A-H](?:0[1-9]|1[0-2])$', t, re.I):
+            return t.upper()
+    return ""
 
-    with open(template_cel_headers, "r") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        fields = reader.fieldnames or []
-        first = {}
-        by_well = {}
+def read_hmm_report(path):
+    rows = []
+    header = None
+    with open(path, "r") as f:
+        for raw in f:
+            line = raw.rstrip("\r\n")
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if header is None:
+                if "cel_files" in parts:
+                    header = parts
+                continue
+            if len(parts) < len(header):
+                parts += [""] * (len(header) - len(parts))
+            rows.append(dict(zip(header, parts)))
 
-        for row in reader:
-            if not first:
-                first = dict(row)
-            well = row.get("affymetrix-plate-peg-wellposition", "")
-            if well:
-                by_well[well.upper()] = dict(row)
+    if header is None:
+        return {}, []
 
-    for req in [
-        "cel_files",
-        "affymetrix-array-id",
-        "affymetrix-array-barcode",
-        "affymetrix-plate-barcode",
-        "affymetrix-plate-peg-wellposition",
-        "cel_filepath",
-        "cel_file_identifier",
-    ]:
-        if req not in fields:
-            fields.append(req)
+    by_base = {}
+    ordered = []
+    for r in rows:
+        base = basename_sample(r.get("cel_files", ""))
+        if not base:
+            continue
+        by_base[base] = r
+        ordered.append(base)
+    return by_base, ordered
 
-    return fields, first, by_well
+# ----- exact donor sample_info.bin parser/writer -----
+def read7(data, pos):
+    result = 0
+    shift = 0
+    while True:
+        if pos >= len(data):
+            raise ValueError("unexpected EOF while reading 7-bit integer")
+        b = data[pos]
+        pos += 1
+        result |= (b & 0x7f) << shift
+        if (b & 0x80) == 0:
+            return result, pos
+        shift += 7
+        if shift > 35:
+            raise ValueError("invalid 7-bit integer")
 
-def read_cel_header_values(cel_path):
-    values = {}
+def read_string(data, pos):
+    n, pos = read7(data, pos)
+    if pos + n > len(data):
+        raise ValueError("string exceeds sample_info.bin length")
+    s = data[pos:pos+n].decode("utf-8")
+    return s, pos + n
 
-    keys = [
-        "affymetrix-array-id",
-        "affymetrix-array-barcode",
-        "affymetrix-plate-barcode",
-        "affymetrix-plate-peg-wellposition",
-        "affymetrix-created-trackingGUID",
-        "affymetrix-parent-dat-file-identifier",
-        "affymetrix-file-identifier",
-        "affymetrix-created-file-identifier",
-        "cel_file_identifier",
-        "affymetrix-scan-date",
-        "affymetrix-workflowGUID",
-        "affymetrix-PlateScanGUID",
-        "affymetrix-scanner-serialnumber",
-    ]
-
-    try:
-        with open(cel_path, "rb") as f:
-            data = f.read(5 * 1024 * 1024)
-        text = data.decode("latin1", errors="ignore")
-    except Exception:
-        return values
-
-    for key in keys:
-        patterns = [
-            re.escape(key) + r"\s*=\s*([^\r\n\t;]+)",
-            re.escape(key) + r"\s*:\s*([^\r\n\t;]+)",
-        ]
-
-        for pat in patterns:
-            m = re.search(pat, text, re.I)
-            if m:
-                v = m.group(1).strip().strip('"').strip("'")
-                if v:
-                    values[key] = v
-                    break
-
-    return values
-
-def write7(f, value):
+def write7(buf, value):
     value = int(value)
     while value >= 0x80:
-        f.write(bytes([(value | 0x80) & 0xff]))
+        buf.append((value | 0x80) & 0xff)
         value >>= 7
-    f.write(bytes([value & 0xff]))
+    buf.append(value & 0xff)
 
-def write_string(f, s):
+def write_string(buf, s):
     if s is None:
         s = ""
     b = str(s).encode("utf-8")
-    write7(f, len(b))
-    f.write(b)
+    write7(buf, len(b))
+    buf.extend(b)
 
-def write_sample_info_bin(path, rows):
-    with open(path, "wb") as f:
-        f.write(struct.pack("<I", len(rows)))
-
-        for field in sample_fields:
-            write_string(f, field)
-
-        for row in rows:
-            for field in sample_fields:
-                write_string(f, row.get(field, ""))
-
-def validate_sample_info(path, expected_count):
+def parse_sample_info(path):
     data = open(path, "rb").read()
-
+    if len(data) < 4:
+        raise ValueError("sample_info.bin too short")
     count = struct.unpack("<I", data[:4])[0]
-    if count != expected_count:
-        raise SystemExit("[ERROR] sample_info.bin count mismatch: {} != {}".format(count, expected_count))
+    pos = 4
 
-    if data[4:14] != b"\tcel_files":
-        raise SystemExit("[ERROR] sample_info.bin header invalid: {}".format(data[:40]))
+    fields = []
+    for _ in range(6):
+        s, pos = read_string(data, pos)
+        fields.append(s)
 
-def normalize_hmm_report(path, sample_rows):
-    if not os.path.exists(path):
-        return
+    rows = []
+    for _ in range(count):
+        vals = []
+        for _ in range(6):
+            s, pos = read_string(data, pos)
+            vals.append(s)
+        rows.append(dict(zip(fields, vals)))
 
-    lines = open(path, "r").read().splitlines()
+    if pos != len(data):
+        raise ValueError("sample_info.bin trailing bytes: {}".format(len(data)-pos))
 
-    header_idx = None
-    header = None
+    return data, fields, rows
 
-    for i, line in enumerate(lines):
-        if not line.strip():
-            continue
-        if line.startswith("#"):
-            continue
-        if "\t" not in line:
-            continue
-        parts = line.split("\t")
-        if "cel_files" in parts:
-            header_idx = i
-            header = parts
-            break
+def serialize_sample_info(fields, rows):
+    buf = bytearray()
+    buf.extend(struct.pack("<I", len(rows)))
+    for field in fields:
+        write_string(buf, field)
+    for row in rows:
+        for field in fields:
+            write_string(buf, row.get(field, ""))
+    return bytes(buf)
 
-    if header_idx is None:
-        return
+# donor binary must be perfectly understood before any modification
+donor_raw, sample_fields, donor_sample_rows = parse_sample_info(donor_sample_info)
+if sample_fields != EXPECTED_FIELDS:
+    raise SystemExit("[ERROR] donor sample_info field schema unexpected: {}".format(sample_fields))
 
-    idx = {}
-    for key in [
-        "cel_files",
-        "affymetrix-plate-barcode",
-        "affymetrix-plate-peg-wellposition",
-    ]:
-        if key in header:
-            idx[key] = header.index(key)
+if serialize_sample_info(sample_fields, donor_sample_rows) != donor_raw:
+    raise SystemExit("[ERROR] donor sample_info round-trip mismatch. 안전 중단.")
 
-    if "cel_files" not in idx:
-        return
+print("[CHECK] donor sample_info.bin round-trip = EXACT")
 
-    by_base = {}
-    for row in sample_rows:
-        by_base[row["cel_files"]] = row
+# donor cel_headers schema is preserved exactly; no new columns are added
+with open(donor_cel_headers, "r", newline="") as f:
+    reader = csv.DictReader(f, delimiter="\t")
+    header_fields = reader.fieldnames or []
+    donor_header_rows = [dict(r) for r in reader]
 
-    out = list(lines)
-    row_i = 0
+if "cel_files" not in header_fields:
+    raise SystemExit("[ERROR] donor cel_headers.txt에 cel_files column 없음")
+if "affymetrix-plate-peg-wellposition" not in header_fields:
+    raise SystemExit("[ERROR] donor cel_headers.txt에 well column 없음")
 
-    for i in range(header_idx + 1, len(lines)):
-        line = lines[i]
+# Previously broken 09 appended these columns even if genuine AxAS did not have them.
+# This universal candidate does NOT append anything.
+print("[CHECK] donor cel_headers columns = {}".format(len(header_fields)))
+print("[CHECK] cel_filepath column present = {}".format("cel_filepath" in header_fields))
+print("[CHECK] cel_file_identifier column present = {}".format("cel_file_identifier" in header_fields))
 
-        if not line.strip() or line.startswith("#") or "\t" not in line:
-            continue
+donor_header_by_well = {}
+for r in donor_header_rows:
+    well = (r.get("affymetrix-plate-peg-wellposition") or "").upper()
+    if well:
+        donor_header_by_well[well] = r
 
-        parts = line.split("\t")
+donor_sample_by_well = {}
+for r in donor_sample_rows:
+    well = (r.get("affymetrix-plate-peg-wellposition") or "").upper()
+    if well:
+        donor_sample_by_well[well] = r
 
-        if len(parts) <= idx["cel_files"]:
-            continue
+if len(donor_sample_by_well) != MAX_INPUT_N:
+    raise SystemExit("[ERROR] donor sample_info unique wells != 96: {}".format(len(donor_sample_by_well)))
+if len(donor_header_by_well) != MAX_INPUT_N:
+    raise SystemExit("[ERROR] donor cel_headers unique wells != 96: {}".format(len(donor_header_by_well)))
 
-        base = basename_sample(parts[idx["cel_files"]])
-        sample_row = by_base.get(base)
-
-        if sample_row is None and row_i < len(sample_rows):
-            sample_row = sample_rows[row_i]
-
-        if sample_row is not None:
-            parts[idx["cel_files"]] = sample_row["cel_files"]
-
-            if "affymetrix-plate-barcode" in idx and len(parts) > idx["affymetrix-plate-barcode"]:
-                parts[idx["affymetrix-plate-barcode"]] = sample_row["affymetrix-plate-barcode"]
-
-            if "affymetrix-plate-peg-wellposition" in idx and len(parts) > idx["affymetrix-plate-peg-wellposition"]:
-                parts[idx["affymetrix-plate-peg-wellposition"]] = sample_row["affymetrix-plate-peg-wellposition"]
-
-            out[i] = "\t".join(parts)
-
-        row_i += 1
-
-    with open(path, "w") as f:
-        f.write("\n".join(out) + "\n")
-
+# input은 96-CEL plate를 기준으로 한다. 실제 HMM/A5에는 QC PASS subset만 포함될 수 있다.
 cel_paths = read_cel_list(cel_list_file)
+if len(cel_paths) != MAX_INPUT_N:
+    raise SystemExit("[ERROR] 현재 master pipeline은 96 input CEL 전용입니다. input CEL count={}".format(len(cel_paths)))
 
-if not cel_paths:
-    raise SystemExit("[ERROR] CEL list가 비어 있습니다.")
+input_by_base = {}
+input_well_by_base = {}
+seen_input_well = set()
+for path in cel_paths:
+    base = basename_sample(path)
+    well = extract_well(base)
+    if not well:
+        raise SystemExit("[ERROR] CEL filename에서 A01-H12 well 확인 불가: {}".format(base))
+    if base in input_by_base:
+        raise SystemExit("[ERROR] duplicate input CEL basename: {}".format(base))
+    if well in seen_input_well:
+        raise SystemExit("[ERROR] duplicate input well: {}".format(well))
+    input_by_base[base] = path
+    input_well_by_base[base] = well
+    seen_input_well.add(well)
 
-windows_prefix = detect_windows_prefix()
-template_fields, template_first, template_by_well = read_template_cel_header()
+if seen_input_well != set(donor_sample_by_well):
+    missing = sorted(set(donor_sample_by_well) - seen_input_well)
+    extra = sorted(seen_input_well - set(donor_sample_by_well))
+    raise SystemExit("[ERROR] input well set != donor 96-well layout. missing={} extra={}".format(missing, extra))
 
-sample_rows = []
-cel_header_rows = []
+# AxiomHMM.report 순서를 A5의 sample 순서로 사용한다.
+# QC fail이 있으면 여기서 96보다 작은 subset이 자동 선택된다.
+hmm_by_base, hmm_order = read_hmm_report(hmm_report_file)
+if not hmm_order:
+    raise SystemExit("[ERROR] AxiomHMM.report.txt에서 current sample 목록을 읽지 못했습니다.")
 
-for idx, cel_path in enumerate(cel_paths):
-    base = basename_sample(cel_path)
-    h = read_cel_header_values(cel_path)
+current = []
+seen_current = set()
+for base in hmm_order:
+    if base not in input_by_base:
+        continue
+    if base in seen_current:
+        continue
+    seen_current.add(base)
+    current.append({
+        "path": input_by_base[base],
+        "base": base,
+        "well": input_well_by_base[base],
+    })
 
-    well = h.get("affymetrix-plate-peg-wellposition") or guess_well(base, idx)
+if not current:
+    raise SystemExit("[ERROR] HMM report sample과 input CEL이 매칭되지 않습니다.")
+
+current_bases = [x["base"] for x in current]
+seen_well = set(x["well"] for x in current)
+
+print("[CHECK] input CEL count = {}".format(len(cel_paths)))
+print("[CHECK] HMM/A5 packaged sample count = {}".format(len(current)))
+print("[CHECK] packaged unique wells = {}".format(len(seen_well)))
+
+bs = "\\"
+env_prefix = os.environ.get("AXAS_WINDOWS_CEL_PREFIX", "").strip()
+if env_prefix:
+    win_prefix = env_prefix.replace("/", bs)
+    if not win_prefix.endswith(bs):
+        win_prefix += bs
+else:
+    safe_run = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_name)
+    win_prefix = (
+        "C:" + bs + "Users" + bs + "Public" + bs + "Documents" + bs +
+        "AxiomAnalysisSuite" + bs + safe_run + bs
+    )
+
+new_sample_rows = []
+new_header_rows = []
+mapping_rows = []
+
+for x in current:
+    base = x["base"]
+    well = x["well"]
+
+    sr = dict(donor_sample_by_well[well])
+    hr = dict(donor_header_by_well[well])
+    hmm = hmm_by_base.get(base, {})
 
     plate = (
-        h.get("affymetrix-plate-barcode") or
-        h.get("affymetrix-array-barcode") or
-        guess_plate(base, run_name)
+        hmm.get("affymetrix-plate-barcode", "")
+        or hmm.get("affymetrix-array-barcode", "")
+        or sr.get("affymetrix-plate-barcode", "")
     )
 
-    array_id = h.get("affymetrix-array-id") or stable_uuid(base, "array_id")
+    donor_base = sr.get("cel_files", "")
 
-    cel_file_identifier = (
-        h.get("cel_file_identifier") or
-        h.get("affymetrix-file-identifier") or
-        h.get("affymetrix-created-file-identifier") or
-        stable_identifier(base, "cel_file_identifier")
+    # Only fields required to synchronize current A5/sample identity are changed.
+    # Verified donor cel_file_identifier / array-id are preserved.
+    sr["cel_files"] = base
+    sr["affymetrix-plate-peg-wellposition"] = well
+    sr["cel_filepath"] = win_prefix + base
+    if plate:
+        sr["affymetrix-plate-barcode"] = plate
+
+    # Preserve the genuine cel_headers column schema exactly.
+    hr["cel_files"] = base
+    hr["affymetrix-plate-peg-wellposition"] = well
+    if plate:
+        if "affymetrix-plate-barcode" in header_fields:
+            hr["affymetrix-plate-barcode"] = plate
+        if "affymetrix-array-barcode" in header_fields:
+            hr["affymetrix-array-barcode"] = plate
+
+    new_sample_rows.append(sr)
+    new_header_rows.append(hr)
+    mapping_rows.append((well, base, donor_base, plate))
+
+with open(out_sample_info, "wb") as f:
+    f.write(serialize_sample_info(sample_fields, new_sample_rows))
+
+with open(out_cel_headers, "w", newline="") as f:
+    writer = csv.DictWriter(
+        f,
+        fieldnames=header_fields,
+        delimiter="\t",
+        lineterminator="\r\n",
+        extrasaction="ignore",
     )
+    writer.writeheader()
+    writer.writerows(new_header_rows)
 
-    win_path = windows_prefix + base
+with open(out_genotyping, "w", newline="") as f:
+    f.write("cel_files\r\n")
+    for x in current:
+        f.write(win_prefix + x["base"] + "\r\n")
 
-    sample_row = {
-        "cel_files": base,
-        "affymetrix-plate-barcode": plate,
-        "affymetrix-plate-peg-wellposition": well,
-        "cel_filepath": win_path,
-        "cel_file_identifier": cel_file_identifier,
-        "affymetrix-array-id": array_id,
-    }
+with open(out_map, "w", newline="") as f:
+    f.write("well\tcurrent_cel\tdonor_cel\tplate_barcode\r\n")
+    for well, current_base, donor_base, plate in mapping_rows:
+        f.write("{}\t{}\t{}\t{}\r\n".format(well, current_base, donor_base, plate))
 
-    sample_rows.append(sample_row)
+# strict post-write checks
+_, fields2, rows2 = parse_sample_info(out_sample_info)
+if fields2 != sample_fields or len(rows2) != len(current):
+    raise SystemExit("[ERROR] output sample_info schema/count mismatch")
 
-    row_template = template_by_well.get(well, template_first)
-    ch = {}
+with open(out_cel_headers, "r", newline="") as f:
+    rr = csv.reader(f, delimiter="\t")
+    out_rows = list(rr)
 
-    for field in template_fields:
-        ch[field] = row_template.get(field, "")
+if len(out_rows) != len(current) + 1:
+    raise SystemExit("[ERROR] output cel_headers line count mismatch")
+if out_rows[0] != header_fields:
+    raise SystemExit("[ERROR] output cel_headers schema changed")
 
-    overrides = {
-        "cel_files": base,
-        "affymetrix-array-id": array_id,
-        "affymetrix-array-barcode": plate,
-        "affymetrix-plate-barcode": plate,
-        "affymetrix-plate-peg-wellposition": well,
-        "cel_filepath": win_path,
-        "cel_file_identifier": cel_file_identifier,
-        "affymetrix-file-identifier": cel_file_identifier,
-        "affymetrix-created-file-identifier": cel_file_identifier,
-        "affymetrix-created-trackingGUID": h.get("affymetrix-created-trackingGUID") or stable_identifier(base, "created_trackingGUID"),
-        "affymetrix-parent-dat-file-identifier": h.get("affymetrix-parent-dat-file-identifier") or stable_identifier(base, "parent_dat_file_identifier"),
-        "affymetrix-workflowGUID": h.get("affymetrix-workflowGUID") or stable_uuid(base, "workflowGUID"),
-        "affymetrix-PlateScanGUID": h.get("affymetrix-PlateScanGUID") or "{}_{}".format(plate, run_name),
-        "affymetrix-scan-date": h.get("affymetrix-scan-date") or datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
+sample_info_names = [r["cel_files"] for r in rows2]
+cel_header_names = [r[header_fields.index("cel_files")] for r in out_rows[1:]]
 
-    for k, v in overrides.items():
-        if k in ch:
-            ch[k] = v
+if sample_info_names != current_bases:
+    raise SystemExit("[ERROR] sample_info sample order mismatch")
+if cel_header_names != current_bases:
+    raise SystemExit("[ERROR] cel_headers sample order mismatch")
 
-    cel_header_rows.append(ch)
-
-# 정답 형식: genotyping_cel_files.txt는 1컬럼 path list
-with open(genotyping_file, "wb") as f:
-    lines = ["cel_files"]
-    for row in sample_rows:
-        lines.append(row["cel_filepath"])
-    f.write(("\r\n".join(lines) + "\r\n").encode("utf-8"))
-
-# 정답 형식: cel_headers.txt는 긴 metadata table
-with open(cel_headers_out, "wb") as f:
-    lines = []
-    lines.append("\t".join(template_fields))
-
-    for row in cel_header_rows:
-        lines.append("\t".join(row.get(c, "") for c in template_fields))
-
-    f.write(("\r\n".join(lines) + "\r\n").encode("utf-8"))
-
-# 정답 형식: sample_info.bin은 binary count + 6 header strings + rows
-write_sample_info_bin(sample_info_bin, sample_rows)
-validate_sample_info(sample_info_bin, len(sample_rows))
-
-# HMM report 안의 sample / plate / well도 현재 sample metadata와 맞춤
-normalize_hmm_report(hmm_report, sample_rows)
-
-print("[OK] current CEL sample metadata generated")
-print("[OK] CEL count = {}".format(len(sample_rows)))
-print("[OK] windows_prefix = {}".format(windows_prefix))
-print("[OK] genotyping_cel_files.txt = {}".format(genotyping_file))
-print("[OK] cel_headers.txt = {}".format(cel_headers_out))
-print("[OK] sample_info.bin = {}".format(sample_info_bin))
+print("[OK] sample_info.bin donor binary schema preserved")
+print("[OK] cel_headers.txt donor column schema preserved")
+print("[OK] current sample names/order synchronized")
+print("[OK] Windows prefix = {}".format(win_prefix))
+print("[OK] mapping = {}".format(out_map))
 PY
 
 echo
-echo "[CHECK] genotyping_cel_files.txt"
-head -n 5 "$AXAS_DIR/genotyping_cel_files.txt" | cat -A
-awk 'NR==1{print "HEADER="$0}' "$AXAS_DIR/genotyping_cel_files.txt"
-
-echo
-echo "[CHECK] sample_info.bin"
-python3 - "$AAS_DATA/sample_info.bin" <<'PY'
-from __future__ import print_function
-import sys, struct
-data=open(sys.argv[1],"rb").read()
-count=struct.unpack("<I", data[:4])[0]
-print("sample_count={}".format(count))
-print("first20={}".format(data[:20]))
-if data[4:14] != b"\tcel_files":
-    raise SystemExit("[ERROR] sample_info.bin format invalid")
-print("[OK] sample_info.bin correct")
-PY
-
-echo
-echo "[CHECK] cel_headers.txt"
-head -n 2 "$AAS_DATA/cel_headers.txt" | cat -A
-head -n 1 "$AAS_DATA/cel_headers.txt" | awk -F '\t' '{print "cel_headers_NF="NF}'
-
-echo
-echo "[6] Logs 복사"
+echo "[5] Logs 복사"
 if [ -d "$OUT/logs" ]; then
-  cp -a "$OUT/logs/." "$AXAS_DIR/Logs/" || true
+  cp -a "$OUT/logs/." "$AXAS_DIR/Logs/" 2>/dev/null || true
 fi
 
 echo
-echo "[7] checksum 확인"
-sha256sum "$SRC_07/AxiomHMM.cnv.a5" "$AXAS_DIR/CNData/AxiomHMM.cnv.a5"
-sha256sum "$SRC_07/AxiomHMM.report.txt" "$AXAS_DIR/CNData/AxiomHMM.report.txt"
+echo "[6] AxAS Copy Number Discovery root cleanup"
+
+# 실제 AxAS에서 MAPD by Plate가 정상 표시되도록,
+# 최종 AxAS batch root에는 아래 파일을 남기지 않는다.
+rm -f \
+  "$AXAS_DIR/axas_sample_name_map.tsv" \
+  "$AXAS_DIR/AxiomGT1.calls.txt" \
+  "$AXAS_DIR/AxiomGT1.confidences.txt" \
+  "$AXAS_DIR/AxiomGT1.report.txt" \
+  "$AXAS_DIR/AxiomGT1.summary.a5"
+
+echo "[OK] AxAS root cleanup 완료"
 
 echo
-echo "[DONE] AxAS batch folder 생성 완료"
+echo "[7] 최종 검증"
+
+SRC_A5_SHA="$(sha256sum "$SRC_07/AxiomHMM.cnv.a5" | awk '{print $1}')"
+DST_A5_SHA="$(sha256sum "$AXAS_DIR/CNData/AxiomHMM.cnv.a5" | awk '{print $1}')"
+
+echo "[CHECK] A5 source   = $SRC_A5_SHA"
+echo "[CHECK] A5 packaged = $DST_A5_SHA"
+
+if [ "$SRC_A5_SHA" != "$DST_A5_SHA" ]; then
+  echo "[ERROR] AxiomHMM.cnv.a5 checksum mismatch"
+  exit 1
+fi
+
+python3 - "$AAS_DATA/sample_info.bin" <<'PY'
+from __future__ import print_function
+import struct, sys
+d = open(sys.argv[1], "rb").read()
+count = struct.unpack("<I", d[:4])[0]
+print("[CHECK] sample_count={}".format(count))
+print("[CHECK] first20={}".format(d[:20]))
+if count <= 0 or count > 96:
+    raise SystemExit("[ERROR] invalid sample_count")
+if d[4:14] != b"\tcel_files":
+    raise SystemExit("[ERROR] sample_info header invalid")
+PY
+
+echo "[CHECK] cel_headers_lines=$(wc -l < "$AAS_DATA/cel_headers.txt")"
+echo "[CHECK] genotyping_lines=$(wc -l < "$AXAS_DIR/genotyping_cel_files.txt")"
+
+SAMPLE_COUNT="$(python3 - "$AAS_DATA/sample_info.bin" <<'PY'
+import struct, sys
+d=open(sys.argv[1],'rb').read()
+print(struct.unpack('<I', d[:4])[0])
+PY
+)"
+
+if [ "$(wc -l < "$AAS_DATA/cel_headers.txt")" -ne "$((SAMPLE_COUNT + 1))" ]; then
+  echo "[ERROR] cel_headers.txt line count mismatch"
+  exit 1
+fi
+
+if [ "$(wc -l < "$AXAS_DIR/genotyping_cel_files.txt")" -ne "$((SAMPLE_COUNT + 1))" ]; then
+  echo "[ERROR] genotyping_cel_files.txt line count mismatch"
+  exit 1
+fi
+
+if find "$AAS_DATA" -maxdepth 1 -type f \
+  \( -name 'All_genotypes_by_snps.CHP.bin' -o -name 'All_genotypes_by_snps.CHP.index.txt' \) \
+  -print | grep -q .; then
+  echo "[ERROR] stale All_genotypes_by_snps 파일이 남아 있습니다."
+  exit 1
+fi
+
+echo
+echo "[CHECK] MAPD by Plate 방해 root 파일 없음"
+
+FORBIDDEN_FAIL=0
+for f in \
+  axas_sample_name_map.tsv \
+  AxiomGT1.calls.txt \
+  AxiomGT1.confidences.txt \
+  AxiomGT1.report.txt \
+  AxiomGT1.summary.a5
+do
+  if [ -e "$AXAS_DIR/$f" ]; then
+    echo "[ERROR] 남아 있음: $AXAS_DIR/$f"
+    FORBIDDEN_FAIL=1
+  else
+    echo "[OK] 없음: $f"
+  fi
+done
+
+if [ "$FORBIDDEN_FAIL" -ne 0 ]; then
+  echo "[ERROR] AxAS root cleanup 검증 실패"
+  exit 1
+fi
+
+echo
+echo "[INFO] axas_sample_name_map.tsv는 AxAS batch 밖에 저장:"
+echo "[INFO] $OUT/axas_sample_name_map.tsv"
+
+echo
+echo "============================================================"
+echo "[DONE] AxAS production batch 생성 완료"
 echo "[DONE] $AXAS_DIR"
+echo "[NOTE] 최종 AxAS batch root에서 AxiomGT1 4종 및 axas_sample_name_map.tsv 제거 적용"
+echo "============================================================"
